@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import L from 'leaflet';
+import { DARK_TILES } from '../utils/mapTiles';
 
 // Create a custom neon green glowing dot icon
 const createGlowingDot = (size, opacity, animationDelay) => {
@@ -239,7 +240,7 @@ function LandingPage() {
           >
             {/* Dark matter styled map tiles from Carto */}
             <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              url={DARK_TILES}
               opacity={0.6}
             />
             

@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap, useMapEvents, Marker, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
+import { DARK_TILES } from '../utils/mapTiles';
 
 // Fix for default Leaflet icon missing issues in React
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -133,7 +134,7 @@ const MapView = ({ routesData, activeRouteMode, liveReports = [], mapSelectionMo
         {/* Dark theme styled map tiles (CartoDB Dark Matter) */}
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          url={DARK_TILES}
         />
         
         {routesData && routesData.fastest && (
