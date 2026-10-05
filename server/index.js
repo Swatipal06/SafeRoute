@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const connectDB = require('./src/config/db');
 const { calculateRouteSafetyScore } = require('./src/services/safetyScoreEngine');
+const { getRouteSafeStops } = require('./src/services/safeStopsService');
 const { classifyReport, generateRouteSummary, draftSOSMessage } = require('./src/services/llmService');
 const Report = require('./src/models/Report');
 const User = require('./src/models/User');
@@ -435,6 +436,76 @@ app.post('/api/route', async (req, res) => {
     }
     console.error('Error fetching route from OSRM:', errorMsg);
     return res.status(500).json({ error: errorMsg, details: error.message });
+  }
+});
+
+// ==========================================
+// SAFE STOPS / ROUTE-SIDE FACILITIES API
+// ==========================================
+app.post('/api/routes/safe-stops', async (req, res) => {
+  try {
+    const { geometry, coordinates, radius } = req.body;
+    const routeGeom = geometry || coordinates;
+
+    if (!routeGeom) {
+      return res.status(400).json({
+        error: 'Route geometry or coordinates array is required'
+      });
+    }
+
+    const coords = Array.isArray(routeGeom) ? routeGeom : routeGeom.coordinates;
+    if (!Array.isArray(coords) || coords.length === 0) {
+      return res.status(400).json({
+        error: 'Valid coordinates array is required'
+      });
+    }
+
+    if (coords.length > 10000) {
+      return res.status(400).json({
+        error: 'Coordinate array too large. Maximum 10,000 points.'
+      });
+    }
+
+    const corridorRadius = radius !== undefined ? Number(radius) : 500;
+    const result = await getRouteSafeStops(coords, corridorRadius);
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error in /api/routes/safe-stops:', error.message);
+    res.status(500).json({
+      error: 'Failed to analyze safe stops along route',
+      details: error.message
+    });
+  }
+});
+
+// Alias GET endpoint supporting query parameters
+app.get('/api/routes/safe-stops', async (req, res) => {
+  try {
+    const { origin, destination, radius } = req.query;
+    if (!origin || !destination) {
+      return res.status(400).json({
+        error: 'Origin and destination query parameters are required for GET request'
+      });
+    }
+
+    const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${origin.trim()};${destination.trim()}?overview=full&geometries=geojson`;
+    const response = await axios.get(osrmUrl);
+
+    if (response.data && response.data.routes && response.data.routes.length > 0) {
+      const geometry = response.data.routes[0].geometry;
+      const corridorRadius = radius !== undefined ? Number(radius) : 500;
+      const result = await getRouteSafeStops(geometry, corridorRadius);
+      return res.json(result);
+    } else {
+      return res.status(404).json({ error: 'Route not found' });
+    }
+  } catch (error) {
+    console.error('Error in GET /api/routes/safe-stops:', error.message);
+    res.status(500).json({
+      error: 'Failed to fetch safe stops',
+      details: error.message
+    });
   }
 });
 

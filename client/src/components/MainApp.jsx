@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import MapView from './MapView';
+import SafeStopsPanel from './SafeStopsPanel';
 import { io } from 'socket.io-client';
 
 const socket = io(import.meta.env.DEV ? `http://${window.location.hostname}:5000` : undefined);
@@ -44,6 +45,16 @@ function MainApp() {
   const [newContactPhone, setNewContactPhone] = useState('');
   const [showContactsPanel, setShowContactsPanel] = useState(false);
 
+  // Safe Stops State
+  const [safeStopsData, setSafeStopsData] = useState(null);
+  const [isSafeStopsLoading, setIsSafeStopsLoading] = useState(false);
+  const [safeStopsError, setSafeStopsError] = useState('');
+  const [safeStopsRadius, setSafeStopsRadius] = useState(500);
+  const [selectedSafeStopCategory, setSelectedSafeStopCategory] = useState('all');
+  const [isSafeStopsPanelOpen, setIsSafeStopsPanelOpen] = useState(false);
+  const [focusedPoi, setFocusedPoi] = useState(null);
+  const [comparisonData, setComparisonData] = useState(null);
+
   const fetchReports = async () => {
     try {
       const response = await axios.get('/api/reports');
@@ -74,8 +85,7 @@ function MainApp() {
     setShowHeatmap(!showHeatmap);
   };
 
-  // Whenever map is dragged or zoomed, and heatmap is active, we could re-fetch
-  // Added a debounce to prevent API spam and rate limits
+  // Whenever map is dragged or zoomed, and heatmap is active, debounce fetch
   useEffect(() => {
     if (showHeatmap && mapBounds && !isLoading) {
       const delayFetch = setTimeout(() => {
@@ -86,16 +96,76 @@ function MainApp() {
               setHeatmapZones([]); // clear zones if too zoomed out
             }
           });
-      }, 1000); // 1 second debounce
+      }, 1000);
 
       return () => clearTimeout(delayFetch);
     }
   }, [mapBounds, showHeatmap, isLoading]);
 
+  // Fetch Safe Stops along the active route
+  const fetchSafeStopsForRoute = useCallback(async (geometry, radius) => {
+    if (!geometry) return;
+    setIsSafeStopsLoading(true);
+    setSafeStopsError('');
+    setFocusedPoi(null);
+
+    try {
+      const response = await axios.post('/api/routes/safe-stops', {
+        geometry,
+        radius
+      });
+
+      if (response.data && response.data.success) {
+        setSafeStopsData(response.data);
+      } else {
+        setSafeStopsError('Unable to load safe stops right now.');
+      }
+    } catch (err) {
+      console.warn('Failed to load safe stops:', err.message);
+      setSafeStopsError(
+        err.response?.data?.error || 'Map data is temporarily unavailable. Please try again.'
+      );
+    } finally {
+      setIsSafeStopsLoading(false);
+    }
+  }, []);
+
+  // Compute Route Comparison Data (Safest vs Fastest Safe Stops summary)
+  const computeComparison = useCallback(async (routes, radius) => {
+    if (!routes || !routes.safest || !routes.fastest) return;
+
+    try {
+      const [safestRes, fastestRes] = await Promise.all([
+        axios.post('/api/routes/safe-stops', { geometry: routes.safest.geometry, radius }),
+        axios.post('/api/routes/safe-stops', { geometry: routes.fastest.geometry, radius })
+      ]);
+
+      if (safestRes.data && fastestRes.data) {
+        setComparisonData({
+          safestCount: safestRes.data.summary?.total || 0,
+          safestPolice: safestRes.data.summary?.police || 0,
+          safestHospital: safestRes.data.summary?.hospital || 0,
+          fastestCount: fastestRes.data.summary?.total || 0,
+          fastestPolice: fastestRes.data.summary?.police || 0,
+          fastestHospital: fastestRes.data.summary?.hospital || 0
+        });
+      }
+    } catch (e) {
+      // Comparison is optional; ignore failure silently
+    }
+  }, []);
+
+  // Trigger Safe Stops fetch when route mode or radius changes
+  useEffect(() => {
+    if (routesData && routesData[activeRouteMode]) {
+      fetchSafeStopsForRoute(routesData[activeRouteMode].geometry, safeStopsRadius);
+    }
+  }, [routesData, activeRouteMode, safeStopsRadius, fetchSafeStopsForRoute]);
+
   const handleSOS = async () => {
     setIsSosActive(true);
     
-    // Generate tracking URL and mock the active route to local storage for the Live Tracking MVP
+    // Generate tracking URL and mock the active route to local storage
     const trackingId = 'sos-' + Math.random().toString(36).substr(2, 6);
     const trackingUrl = `${window.location.origin}/track/${trackingId}`;
     
@@ -118,14 +188,12 @@ function MainApp() {
           await axios.post('/api/sos', { lat, lng, userId: user?.id, trackingUrl });
           alert(`🚨 SOS TRIGGERED 🚨\n\nYour live location has been shared with your Emergency Contacts!\n\nLink: ${trackingUrl}`);
           
-          // Send initial location
           socket.emit('location_update', {
             trackingId,
             position: [lat, lng],
             index: 0
           });
           
-          // Start watching user's real GPS position for the SOS live feed
           if (window.liveTrackingWatcher) navigator.geolocation.clearWatch(window.liveTrackingWatcher);
           
           window.liveTrackingWatcher = navigator.geolocation.watchPosition(
@@ -236,6 +304,8 @@ function MainApp() {
     setRoutesData(null);
     setHeatmapZones([]);
     setShareLink('');
+    setSafeStopsData(null);
+    setFocusedPoi(null);
     
     try {
       const response = await axios.post('/api/route', {
@@ -244,18 +314,25 @@ function MainApp() {
       });
       
       if (response.data && response.data.fastest && response.data.safest) {
-        setRoutesData({
+        const newRoutesData = {
           fastest: response.data.fastest,
           safest: response.data.safest
-        });
+        };
+        setRoutesData(newRoutesData);
         
-        // Immediately load the heatmap data fetched alongside the route
+        // Load heatmap data fetched alongside route
         if (response.data.heatmapZones) {
           setHeatmapZones(response.data.heatmapZones);
         }
         
         // Automatically enable heatmap visualization along the new route
         setShowHeatmap(true);
+        setIsSafeStopsPanelOpen(false);
+
+        // Fetch Safe Stops for default active route (safest) in background
+        fetchSafeStopsForRoute(newRoutesData.safest.geometry, safeStopsRadius);
+        // Compute comparison in background
+        computeComparison(newRoutesData, safeStopsRadius);
       } else {
         setError('Received invalid route data from server.');
       }
@@ -270,21 +347,14 @@ function MainApp() {
   const shareLiveLocation = () => {
     if (!routesData) return;
     
-    // Generate a mock tracking ID
     const trackingId = 'trk-' + Math.random().toString(36).substr(2, 6);
-    
-    // Extract the active route coordinates. Note: Backend provides [lng, lat], Leaflet wants [lat, lng].
-    // Wait, the backend provides [lng, lat] for OSRM, but wait, LiveTracking.jsx currently expects parsed.geometry.coordinates to be [lng, lat] and maps it to [lat, lng].
-    // So let's send the exact raw geometry array.
     const activeRouteGeoJSON = routesData[activeRouteMode];
     
-    // Connect to WebSocket server and broadcast the route
     socket.emit('start_tracking', {
       trackingId,
       route: activeRouteGeoJSON
     });
     
-    // Watch the user's real GPS position and broadcast it to the server
     if (window.liveTrackingWatcher) navigator.geolocation.clearWatch(window.liveTrackingWatcher);
     
     window.liveTrackingWatcher = navigator.geolocation.watchPosition(
@@ -321,6 +391,10 @@ function MainApp() {
           destination={destination}
           onBoundsChange={setMapBounds}
           isLoading={isLoading}
+          safeStops={safeStopsData?.stops || []}
+          selectedCategory={selectedSafeStopCategory}
+          focusedPoi={focusedPoi}
+          showSafeStops={isSafeStopsPanelOpen}
         />
       </div>
       
@@ -367,9 +441,23 @@ function MainApp() {
           >
             {showHeatmap ? 'Hide Risk Map' : '🌙 Night Risk'}
           </button>
+          {routesData && (
+            <button 
+              onClick={() => setIsSafeStopsPanelOpen(!isSafeStopsPanelOpen)}
+              className={`px-5 py-2 rounded-full font-bold text-sm transition-all flex items-center gap-1.5 ${isSafeStopsPanelOpen ? 'bg-neonGreen text-black font-extrabold shadow-[0_0_12px_rgba(46,204,113,0.4)]' : 'text-gray-300 hover:text-white hover:bg-gray-800/50'}`}
+            >
+              <span>{isSafeStopsPanelOpen ? '✓' : '🛡️'}</span>
+              <span>Safe Stops</span>
+              {safeStopsData?.summary?.total !== undefined && (
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${isSafeStopsPanelOpen ? 'bg-black text-neonGreen' : 'bg-gray-800 text-gray-400'}`}>
+                  {safeStopsData.summary.total}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
-        {/* Top Right: User Profile */}
+        {/* Top Right: User Profile & Emergency Contacts */}
         <div className="pointer-events-auto flex flex-col items-end relative">
           <button 
             onClick={() => setShowContactsPanel(!showContactsPanel)}
@@ -386,7 +474,7 @@ function MainApp() {
 
           {/* Contacts Dropdown Panel */}
           {showContactsPanel && user && (
-            <div className="absolute top-16 right-0 w-80 bg-[#0f1424]/95 backdrop-blur-3xl border border-gray-700 rounded-2xl shadow-2xl p-5 overflow-hidden animate-in fade-in slide-in-from-top-4">
+            <div className="absolute top-16 right-0 w-80 bg-[#0f1424]/95 backdrop-blur-3xl border border-gray-700 rounded-2xl shadow-2xl p-5 overflow-hidden animate-in fade-in slide-in-from-top-4 z-30">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-gray-200">Emergency Contacts</h3>
                 <span className="text-xs bg-gray-800/80 text-gray-300 px-2 py-1 rounded-full">{contacts.length} / 5</span>
@@ -418,7 +506,7 @@ function MainApp() {
       </div>
 
       {/* 🔍 FLOATING SEARCH CARD (Left Side) */}
-      <div className="absolute top-28 left-4 sm:left-6 z-10 w-80 pointer-events-auto">
+      <div className="absolute top-24 sm:top-28 left-4 sm:left-6 z-10 w-80 pointer-events-auto">
         <div className="bg-[#0f1424]/80 backdrop-blur-xl border border-gray-800/80 p-5 rounded-2xl shadow-2xl">
           <h2 className="text-xl font-bold mb-4 text-white">Find <span className="text-neonGreen">Safe</span>Route</h2>
           
@@ -448,114 +536,156 @@ function MainApp() {
 
         {/* Mobile Action Buttons (Visible only on small screens) */}
         <div className="md:hidden flex gap-2 mt-4">
-          <button onClick={handleSOS} className="flex-1 bg-red-600 rounded-xl py-3 font-bold text-white shadow-lg">SOS</button>
-          <button onClick={() => setMapSelectionMode(mapSelectionMode === 'report' ? null : 'report')} className="flex-1 bg-gray-800/80 backdrop-blur rounded-xl py-3 font-bold text-white shadow-lg text-sm">Report</button>
+          <button onClick={handleSOS} className="flex-1 bg-red-600 rounded-xl py-3 font-bold text-white shadow-lg text-sm">🚨 SOS</button>
+          <button onClick={() => setMapSelectionMode(mapSelectionMode === 'report' ? null : 'report')} className="flex-1 bg-gray-800/80 backdrop-blur rounded-xl py-3 font-bold text-white shadow-lg text-xs">📍 Report</button>
+          {routesData && (
+            <button 
+              onClick={() => setIsSafeStopsPanelOpen(!isSafeStopsPanelOpen)} 
+              className={`flex-1 rounded-xl py-3 font-extrabold shadow-lg text-xs transition-all ${isSafeStopsPanelOpen ? 'bg-neonGreen text-black' : 'bg-gray-800/80 text-gray-300'}`}
+            >
+              {isSafeStopsPanelOpen ? '✓ Safe Stops' : '🛡️ Safe Stops'}
+            </button>
+          )}
         </div>
       </div>
 
+      {/* 🛡️ FLOATING SAFE STOPS PANEL (Right Side - Shown when toggled ON) */}
+      {routesData && isSafeStopsPanelOpen && (
+        <div className="absolute top-24 sm:top-28 right-4 sm:right-6 z-10 pointer-events-auto transition-all duration-300 ease-in-out animate-in fade-in slide-in-from-right-3">
+          <SafeStopsPanel 
+            safeStopsData={safeStopsData}
+            isLoading={isSafeStopsLoading}
+            error={safeStopsError}
+            selectedCategory={selectedSafeStopCategory}
+            setSelectedCategory={setSelectedSafeStopCategory}
+            radius={safeStopsRadius}
+            setRadius={setSafeStopsRadius}
+            onSelectStop={(stop) => setFocusedPoi(stop)}
+            activeRouteMode={activeRouteMode}
+            isOpen={isSafeStopsPanelOpen}
+            onToggleOpen={() => setIsSafeStopsPanelOpen(!isSafeStopsPanelOpen)}
+            comparisonData={comparisonData}
+          />
+        </div>
+      )}
+
       {/* 📊 BOTTOM DASHBOARD PANEL */}
       {routesData && (
-        <div className="absolute bottom-4 sm:bottom-6 left-4 right-4 z-10 pointer-events-auto">
-          <div className="bg-[#0f1424]/90 backdrop-blur-2xl border border-gray-800/80 rounded-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.5)] p-4 sm:p-6 flex gap-4 sm:gap-6 overflow-x-auto custom-scrollbar items-stretch snap-x">
+        <div className="absolute bottom-4 sm:bottom-6 left-4 sm:left-6 z-10 pointer-events-auto max-w-[calc(100vw-2rem)]">
+          <div className="bg-[#0f1424]/90 backdrop-blur-2xl border border-gray-800/80 rounded-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.5)] p-3.5 sm:p-4 flex gap-3 sm:gap-4 overflow-x-auto custom-scrollbar items-stretch snap-x w-fit">
             
-            {/* Navigational Info Card */}
-            <div className="flex-shrink-0 w-64 bg-gradient-to-b from-[#1a1f35] to-[#0f1424] rounded-2xl p-5 border border-gray-700/50 flex flex-col justify-between relative snap-center">
-              <div className="absolute top-4 right-4 bg-accentYellow text-black text-[10px] font-black uppercase px-2 py-1 rounded-full tracking-widest shadow-lg">Active</div>
+            {/* 1. Navigational Info Card */}
+            <div className="flex-shrink-0 w-56 sm:w-60 bg-gradient-to-b from-[#1a1f35] to-[#0f1424] rounded-2xl p-4 border border-gray-700/50 flex flex-col justify-between relative snap-center">
+              <div className="absolute top-3 right-3 bg-accentYellow text-black text-[9px] font-black uppercase px-2 py-0.5 rounded-full tracking-widest shadow-lg">Active</div>
               <div>
-                <div className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-1">Route Status</div>
-                <div className="font-bold text-lg text-white mb-4">Navigating...</div>
+                <div className="text-gray-500 text-[10px] font-bold uppercase tracking-widest mb-1">Route Status</div>
+                <div className="font-bold text-base text-white mb-3">Navigating...</div>
                 
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-sm">
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
                     <span className="text-gray-400">Mode</span>
                     <span className="text-white font-medium capitalize">{activeRouteMode}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-400">Safe Stops</span>
+                    <span className="text-neonGreen font-semibold">
+                      {safeStopsData?.summary?.total !== undefined ? `${safeStopsData.summary.total} stops` : 'Scanning...'}
+                    </span>
                   </div>
                 </div>
               </div>
               <button 
                 onClick={shareLiveLocation} 
-                className="mt-6 w-full bg-[#2a2f4c] hover:bg-accentPurple text-white text-sm font-bold py-3 rounded-xl transition-colors border border-gray-600 hover:border-purple-400 shadow-lg flex items-center justify-center gap-2"
+                className="mt-4 w-full bg-[#2a2f4c] hover:bg-accentPurple text-white text-xs font-bold py-2.5 rounded-xl transition-colors border border-gray-600 hover:border-purple-400 shadow-lg flex items-center justify-center gap-1.5"
               >
                 📡 Share Link
               </button>
-              {shareLink && <div className="mt-2 text-center text-[10px] text-neonGreen font-mono break-all">{shareLink}</div>}
+              {shareLink && <div className="mt-1.5 text-center text-[9px] text-neonGreen font-mono break-all">{shareLink}</div>}
             </div>
 
-            {/* Safest Route Card */}
+            {/* 2. Safest Route Card */}
             <div 
               onClick={() => setActiveRouteMode('safest')}
-              className={`flex-shrink-0 w-72 rounded-2xl p-5 border cursor-pointer transition-all duration-300 flex flex-col justify-between snap-center relative overflow-hidden ${
+              className={`flex-shrink-0 w-64 sm:w-68 rounded-2xl p-4 border cursor-pointer transition-all duration-300 flex flex-col justify-between snap-center relative overflow-hidden ${
                 activeRouteMode === 'safest' 
                   ? 'bg-gradient-to-br from-green-900/40 to-[#0f1424] border-neonGreen shadow-[0_0_30px_rgba(46,204,113,0.15)] scale-[1.02]' 
                   : 'bg-[#1a1f35]/60 border-gray-700/50 hover:border-gray-500'
               }`}
             >
               {activeRouteMode === 'safest' && <div className="absolute top-0 left-0 w-full h-1 bg-neonGreen"></div>}
-              <div className="flex justify-between items-start mb-6">
+              <div className="flex justify-between items-start mb-4">
                 <div>
-                  <h3 className="font-black text-white text-lg tracking-wide mb-1">🛡️ Safest</h3>
-                  <div className="text-xs text-green-400 font-bold uppercase tracking-widest">Recommended</div>
+                  <h3 className="font-black text-white text-base tracking-wide mb-0.5">🛡️ Safest</h3>
+                  <div className="text-[10px] text-green-400 font-bold uppercase tracking-widest">Recommended</div>
                 </div>
                 <div className="text-right flex items-baseline gap-1">
-                  <span className="text-4xl font-black text-white tracking-tighter">{routesData.safest.score}</span>
-                  <span className="text-sm font-bold text-gray-500">/100</span>
+                  <span className="text-3xl font-black text-white tracking-tighter">{routesData.safest.score}</span>
+                  <span className="text-xs font-bold text-gray-500">/100</span>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-[#0f1424]/50 rounded-xl p-3 border border-gray-800">
-                  <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">ETA</div>
-                  <div className="text-xl font-bold text-white">{Math.round(routesData.safest.duration / 60)}<span className="text-sm text-gray-400 font-medium ml-1">min</span></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-[#0f1424]/50 rounded-xl p-2.5 border border-gray-800">
+                  <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">ETA</div>
+                  <div className="text-lg font-bold text-white">{Math.round(routesData.safest.duration / 60)}<span className="text-xs text-gray-400 font-medium ml-1">min</span></div>
                 </div>
-                <div className="bg-[#0f1424]/50 rounded-xl p-3 border border-gray-800">
-                  <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Distance</div>
-                  <div className="text-xl font-bold text-white">{Math.round(routesData.safest.distance / 1000)}<span className="text-sm text-gray-400 font-medium ml-1">km</span></div>
+                <div className="bg-[#0f1424]/50 rounded-xl p-2.5 border border-gray-800">
+                  <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Distance</div>
+                  <div className="text-lg font-bold text-white">{Math.round(routesData.safest.distance / 1000)}<span className="text-xs text-gray-400 font-medium ml-1">km</span></div>
                 </div>
               </div>
             </div>
 
-            {/* Fastest Route Card */}
+            {/* 3. Fastest Route Card */}
             <div 
               onClick={() => setActiveRouteMode('fastest')}
-              className={`flex-shrink-0 w-72 rounded-2xl p-5 border cursor-pointer transition-all duration-300 flex flex-col justify-between snap-center relative overflow-hidden ${
+              className={`flex-shrink-0 w-64 sm:w-68 rounded-2xl p-4 border cursor-pointer transition-all duration-300 flex flex-col justify-between snap-center relative overflow-hidden ${
                 activeRouteMode === 'fastest' 
                   ? 'bg-gradient-to-br from-blue-900/40 to-[#0f1424] border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.15)] scale-[1.02]' 
                   : 'bg-[#1a1f35]/60 border-gray-700/50 hover:border-gray-500'
               }`}
             >
               {activeRouteMode === 'fastest' && <div className="absolute top-0 left-0 w-full h-1 bg-blue-500"></div>}
-              <div className="flex justify-between items-start mb-6">
+              <div className="flex justify-between items-start mb-4">
                 <div>
-                  <h3 className="font-black text-white text-lg tracking-wide mb-1">⚡ Fastest</h3>
-                  <div className="text-xs text-blue-400 font-bold uppercase tracking-widest">Time saving</div>
+                  <h3 className="font-black text-white text-base tracking-wide mb-0.5">⚡ Fastest</h3>
+                  <div className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">Time saving</div>
                 </div>
                 <div className="text-right flex items-baseline gap-1">
-                  <span className="text-4xl font-black text-white tracking-tighter">{routesData.fastest.score}</span>
-                  <span className="text-sm font-bold text-gray-500">/100</span>
+                  <span className="text-3xl font-black text-white tracking-tighter">{routesData.fastest.score}</span>
+                  <span className="text-xs font-bold text-gray-500">/100</span>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-[#0f1424]/50 rounded-xl p-3 border border-gray-800">
-                  <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">ETA</div>
-                  <div className="text-xl font-bold text-white">{Math.round(routesData.fastest.duration / 60)}<span className="text-sm text-gray-400 font-medium ml-1">min</span></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-[#0f1424]/50 rounded-xl p-2.5 border border-gray-800">
+                  <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">ETA</div>
+                  <div className="text-lg font-bold text-white">{Math.round(routesData.fastest.duration / 60)}<span className="text-xs text-gray-400 font-medium ml-1">min</span></div>
                 </div>
-                <div className="bg-[#0f1424]/50 rounded-xl p-3 border border-gray-800">
-                  <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Distance</div>
-                  <div className="text-xl font-bold text-white">{Math.round(routesData.fastest.distance / 1000)}<span className="text-sm text-gray-400 font-medium ml-1">km</span></div>
+                <div className="bg-[#0f1424]/50 rounded-xl p-2.5 border border-gray-800">
+                  <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Distance</div>
+                  <div className="text-lg font-bold text-white">{Math.round(routesData.fastest.distance / 1000)}<span className="text-xs text-gray-400 font-medium ml-1">km</span></div>
                 </div>
               </div>
             </div>
 
-            {/* AI Summary Card */}
-            <div className="flex-shrink-0 w-80 lg:flex-grow bg-[#1a1f35]/60 rounded-2xl p-5 border border-gray-700/50 flex flex-col snap-center relative overflow-hidden">
-              <div className="absolute -right-4 -top-4 text-6xl opacity-10">✨</div>
-              <div className="text-[10px] text-accentPurple font-black uppercase tracking-widest flex items-center gap-2 mb-3">
-                <span className="w-2 h-2 rounded-full bg-accentPurple animate-pulse"></span>
-                AI Route Intelligence
+            {/* 4. AI Route Intelligence Card (Visible in Footer when Safe Stops is OFF) */}
+            {!isSafeStopsPanelOpen && (
+              <div className="flex-shrink-0 w-72 sm:w-80 bg-[#1a1f35]/60 rounded-2xl p-4 border border-gray-700/50 flex flex-col justify-between snap-center relative overflow-hidden transition-all duration-300 ease-in-out animate-in fade-in">
+                <div className="absolute -right-3 -top-3 text-5xl opacity-10">✨</div>
+                <div>
+                  <div className="text-[10px] text-accentPurple font-black uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accentPurple animate-pulse"></span>
+                    AI Route Intelligence
+                  </div>
+                  <p className="text-xs text-gray-300 leading-relaxed font-medium line-clamp-3">
+                    {activeRouteMode === 'safest' ? routesData.safest.summary : routesData.fastest.summary}
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-gray-800 flex items-center justify-between text-[10px]">
+                  <span className="text-gray-400 capitalize">{activeRouteMode} Route Analysis</span>
+                  <span className="text-neonGreen font-semibold">AI Verified</span>
+                </div>
               </div>
-              <p className="text-sm text-gray-300 leading-relaxed font-medium mt-2">
-                {activeRouteMode === 'safest' ? routesData.safest.summary : routesData.fastest.summary}
-              </p>
-            </div>
+            )}
 
           </div>
         </div>

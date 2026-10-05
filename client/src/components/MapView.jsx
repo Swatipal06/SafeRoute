@@ -2,17 +2,17 @@ import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap, useMapEvents, Marker, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import { DARK_TILES } from '../utils/mapTiles';
+import { CATEGORY_CONFIG, createSafeStopIcon } from '../utils/safeStopIcons';
 
 // Fix for default Leaflet icon missing issues in React
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
+  iconUrl: icon,
+  shadowUrl: iconShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41]
 });
-L.Marker.prototype.options.icon = DefaultIcon;
 L.Marker.prototype.options.icon = DefaultIcon;
 
 // Custom red icon for reports
@@ -34,7 +34,7 @@ const MapClickHandler = ({ onMapClick, mapSelectionMode }) => {
       }
     }
   });
-  
+
   useEffect(() => {
     if (mapSelectionMode) {
       map.getContainer().style.cursor = 'crosshair';
@@ -55,6 +55,20 @@ const MapRecenter = ({ routeGeoJSON }) => {
       map.fitBounds(geoJsonLayer.getBounds(), { padding: [50, 50] });
     }
   }, [routeGeoJSON, map]);
+  return null;
+};
+
+// Component to fly to a selected POI
+const FocusPoiHandler = ({ focusedPoi }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (focusedPoi && focusedPoi.latitude && focusedPoi.longitude) {
+      map.flyTo([focusedPoi.latitude, focusedPoi.longitude], 16, {
+        animate: true,
+        duration: 1.2
+      });
+    }
+  }, [focusedPoi, map]);
   return null;
 };
 
@@ -117,50 +131,73 @@ const MapLocker = ({ isLoading }) => {
   return null;
 };
 
-const MapView = ({ routesData, activeRouteMode, liveReports = [], mapSelectionMode, onMapClick, showHeatmap = false, heatmapZones = [], origin, destination, onBoundsChange, isLoading }) => {
+const MapView = ({
+  routesData,
+  activeRouteMode,
+  liveReports = [],
+  mapSelectionMode,
+  onMapClick,
+  showHeatmap = false,
+  heatmapZones = [],
+  origin,
+  destination,
+  onBoundsChange,
+  isLoading,
+  safeStops = [],
+  selectedCategory = 'all',
+  focusedPoi = null,
+  showSafeStops = true
+}) => {
   // Default center: Delhi, India
-  const defaultCenter = [28.6139, 77.2090];
+  const defaultCenter = [28.6139, 77.209];
+
+  // Filter Safe Stops by selected category
+  const visibleSafeStops = showSafeStops
+    ? safeStops.filter((stop) => selectedCategory === 'all' || stop.category === selectedCategory)
+    : [];
 
   return (
     <div className="h-full w-full bg-[#0f1424]">
-      <MapContainer 
-        center={defaultCenter} 
-        zoom={13} 
+      <MapContainer
+        center={defaultCenter}
+        zoom={13}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
       >
         <MapLocker isLoading={isLoading} />
         <BoundsEmitter onBoundsChange={onBoundsChange} />
+        <FocusPoiHandler focusedPoi={focusedPoi} />
+
         {/* Dark theme styled map tiles (CartoDB Dark Matter) */}
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={DARK_TILES}
         />
-        
+
         {routesData && routesData.fastest && (
-          <GeoJSON 
+          <GeoJSON
             key={`fastest-${activeRouteMode === 'fastest'}`}
-            data={routesData.fastest.geometry} 
-            pathOptions={{ 
+            data={routesData.fastest.geometry}
+            pathOptions={{
               color: '#3b82f6', // blue
-              weight: activeRouteMode === 'fastest' ? 6 : 4, 
-              opacity: activeRouteMode === 'fastest' ? 0.9 : 0.3 
-            }} 
+              weight: activeRouteMode === 'fastest' ? 6 : 4,
+              opacity: activeRouteMode === 'fastest' ? 0.9 : 0.3
+            }}
           />
         )}
 
         {routesData && routesData.safest && (
-          <GeoJSON 
+          <GeoJSON
             key={`safest-${activeRouteMode === 'safest'}`}
-            data={routesData.safest.geometry} 
-            pathOptions={{ 
+            data={routesData.safest.geometry}
+            pathOptions={{
               color: '#22c55e', // green
-              weight: activeRouteMode === 'safest' ? 6 : 4, 
-              opacity: activeRouteMode === 'safest' ? 0.9 : 0.3 
-            }} 
+              weight: activeRouteMode === 'safest' ? 6 : 4,
+              opacity: activeRouteMode === 'safest' ? 0.9 : 0.3
+            }}
           />
         )}
-        
+
         {routesData && (
           <MapRecenter routeGeoJSON={routesData[activeRouteMode]?.geometry} />
         )}
@@ -178,60 +215,143 @@ const MapView = ({ routesData, activeRouteMode, liveReports = [], mapSelectionMo
         )}
 
         {/* Render Night Risk Heatmap */}
-        {showHeatmap && heatmapZones.map((zone, idx) => {
-          // Cap the visual radius so they don't look like massive continent-sized blobs
-          const maxRadius = Math.min(zone.radiusKm * 1000, 500); 
-          
-          return (
-            <React.Fragment key={`heatmap-${idx}`}>
-              {/* Outer soft glow */}
-              <Circle
-                center={[zone.coordinates[1], zone.coordinates[0]]}
-                radius={maxRadius}
-                pathOptions={{
-                  color: 'transparent',
-                  fillColor: '#ff2a4b', // Neon pinkish-red
-                  fillOpacity: 0.08
-                }}
-              />
-              {/* Mid layer */}
-              <Circle
-                center={[zone.coordinates[1], zone.coordinates[0]]}
-                radius={maxRadius * 0.6}
-                pathOptions={{
-                  color: 'transparent',
-                  fillColor: '#ff2a4b',
-                  fillOpacity: 0.15
-                }}
-              />
-              {/* Inner core */}
-              <Circle
-                center={[zone.coordinates[1], zone.coordinates[0]]}
-                radius={maxRadius * 0.25}
-                pathOptions={{
-                  color: 'transparent',
-                  fillColor: '#ff2a4b',
-                  fillOpacity: 0.35
-                }}
-              />
-            </React.Fragment>
-          );
-        })}
+        {showHeatmap &&
+          heatmapZones.map((zone, idx) => {
+            const maxRadius = Math.min(zone.radiusKm * 1000, 500);
+            return (
+              <React.Fragment key={`heatmap-${idx}`}>
+                <Circle
+                  center={[zone.coordinates[1], zone.coordinates[0]]}
+                  radius={maxRadius}
+                  pathOptions={{
+                    color: 'transparent',
+                    fillColor: '#ff2a4b',
+                    fillOpacity: 0.08
+                  }}
+                />
+                <Circle
+                  center={[zone.coordinates[1], zone.coordinates[0]]}
+                  radius={maxRadius * 0.6}
+                  pathOptions={{
+                    color: 'transparent',
+                    fillColor: '#ff2a4b',
+                    fillOpacity: 0.15
+                  }}
+                />
+                <Circle
+                  center={[zone.coordinates[1], zone.coordinates[0]]}
+                  radius={maxRadius * 0.25}
+                  pathOptions={{
+                    color: 'transparent',
+                    fillColor: '#ff2a4b',
+                    fillOpacity: 0.35
+                  }}
+                />
+              </React.Fragment>
+            );
+          })}
 
         {/* Render Live Reports */}
         {liveReports.map((report) => (
-          <Marker 
-            key={report._id} 
+          <Marker
+            key={report._id}
             position={[report.location.coordinates[1], report.location.coordinates[0]]}
             icon={reportIcon}
           >
             <Popup>
-              <strong>Community Report</strong><br />
-              {report.reason}<br />
-              <span className="text-xs text-gray-500">{new Date(report.createdAt).toLocaleDateString()}</span>
+              <strong>Community Report</strong>
+              <br />
+              {report.reason}
+              <br />
+              <span className="text-xs text-gray-500">
+                {new Date(report.createdAt).toLocaleDateString()}
+              </span>
             </Popup>
           </Marker>
         ))}
+
+        {/* Render Safe Stops / Route-side Facilities Markers */}
+        {visibleSafeStops.map((stop) => {
+          const isFocused = focusedPoi && focusedPoi.id === stop.id;
+          const catCfg = CATEGORY_CONFIG[stop.category] || {
+            icon: '📍',
+            label: 'Safe Stop',
+            color: '#2ecc71',
+            text: 'text-green-400'
+          };
+
+          return (
+            <Marker
+              key={stop.id}
+              position={[stop.latitude, stop.longitude]}
+              icon={createSafeStopIcon(stop.category, isFocused)}
+            >
+              <Popup className="custom-dark-popup">
+                <div style={{ minWidth: '200px', maxWidth: '260px', fontFamily: 'sans-serif' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '14px' }}>{catCfg.icon}</span>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        textTransform: 'uppercase',
+                        color: catCfg.color,
+                        letterSpacing: '0.05em'
+                      }}
+                    >
+                      {catCfg.label || stop.category}
+                    </span>
+                  </div>
+
+                  <h4 style={{ margin: '0 0 6px 0', fontSize: '14px', fontWeight: 'bold', color: '#111827' }}>
+                    {stop.name}
+                  </h4>
+
+                  <div style={{ fontSize: '11px', color: '#4b5563', marginBottom: '8px', lineHeight: '1.4' }}>
+                    <div style={{ fontWeight: '600', color: '#059669', marginBottom: '2px' }}>
+                      📍 {stop.distanceFromRoute}m from route
+                      {stop.distanceAlongRoute > 0 && (
+                        <span> · {(stop.distanceAlongRoute / 1000).toFixed(1)}km in</span>
+                      )}
+                    </div>
+
+                    {stop.tags?.address && (
+                      <div style={{ marginTop: '3px' }}>🏢 {stop.tags.address}</div>
+                    )}
+                    {stop.tags?.openingHours && (
+                      <div style={{ marginTop: '2px' }}>🕒 {stop.tags.openingHours}</div>
+                    )}
+                    {stop.tags?.phone && (
+                      <div style={{ marginTop: '2px' }}>
+                        📞 <a href={`tel:${stop.tags.phone}`} style={{ color: '#2563eb', textDecoration: 'none' }}>{stop.tags.phone}</a>
+                      </div>
+                    )}
+                  </div>
+
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${stop.latitude},${stop.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'block',
+                      textAlign: 'center',
+                      background: '#111827',
+                      color: '#ffffff',
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      padding: '6px 10px',
+                      borderRadius: '8px',
+                      textDecoration: 'none',
+                      marginTop: '4px'
+                    }}
+                  >
+                    Open in Maps ↗
+                  </a>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
     </div>
   );

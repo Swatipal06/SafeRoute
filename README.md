@@ -24,6 +24,30 @@ Instead of considering only distance and travel time, SafeRoute adds a **safety 
 * Separates the **Safest** and **Fastest** route options.
 * Displays route-specific AI-generated explanations.
 
+### 🛡️ Route-Side Safe Stops
+
+After routes are generated and the user selects/views a route, SafeRoute identifies useful public facilities located directly along or near that specific route's corridor.
+
+> **Note:** Safe Stops is a **separate intelligence layer** from the numerical safety scoring engine. The existing safety score formula remains independent, while Safe Stops answers: *"What useful, safe, and essential places are available along my route if I need to stop, seek shelter, get help, or refuel?"*
+
+**Categories Identified:**
+* ☕ **Cafes** (`amenity=cafe`)
+* 🍴 **Restaurants & Eateries** (`amenity=restaurant`, `amenity=fast_food`)
+* 🏨 **Hotels & Lodging** (`tourism=hotel`, `tourism=guest_house`, `tourism=hostel`)
+* 🏥 **Hospitals & Medical Centers** (`amenity=hospital`, `amenity=clinic`)
+* 👮 **Police Stations** (`amenity=police`)
+* 💊 **Pharmacies & Chemists** (`amenity=pharmacy`)
+* ⛽ **Fuel Stations** (`amenity=fuel`)
+* 🏧 **ATMs & Banking** (`amenity=atm`, `amenity=bank`)
+* 🛒 **Shops & Convenience Stores** (`shop=*`)
+
+**How it Works:**
+1. **Actual Route Geometry Corridor:** Uses the exact polyline coordinates from OSRM to establish a buffer corridor (configurable: 250m, 500m, 1000m).
+2. **Geospatial Distance Calculation:** For every POI, calculates the minimum perpendicular distance to the closest line segment of the route polyline and its distance along the journey.
+3. **Deduplication & Category Normalization:** Cleans and normalizes OSM elements, eliminating duplicate nodes/ways.
+4. **Interactive Map & Filter Controls:** Interactive category pills, custom category-themed map markers, rich popups with opening hours and contact links, and emergency highlight shortcuts.
+5. **Route-Specific Reactivity:** Switching between Safest and Fastest routes automatically re-analyzes and updates the safe stops for the selected path.
+
 ### 📊 Multi-Signal Safety Scoring
 
 SafeRoute combines multiple safety signals before generating the final route score:
@@ -304,9 +328,13 @@ SafeRoute/
 │       │   ├── LandingPage.jsx
 │       │   ├── MainApp.jsx
 │       │   ├── MapView.jsx
+│       │   ├── SafeStopsPanel.jsx
 │       │   ├── RouteSearchBar.jsx
 │       │   ├── LiveTracking.jsx
 │       │   └── AdminCampusPilot.jsx
+│       ├── utils/
+│       │   ├── mapTiles.js
+│       │   └── safeStopIcons.js
 │       └── App.jsx
 │
 ├── server/
@@ -327,13 +355,16 @@ SafeRoute/
 │       │
 │       ├── services/
 │       │   ├── safetyScoreEngine.js
+│       │   ├── safeStopsService.js
 │       │   ├── osmService.js
 │       │   ├── nasaService.js
 │       │   ├── crimeDataService.js
 │       │   └── llmService.js
 │       │
 │       └── data/
-│           └── historicalCrimeData.json
+│           ├── historicalCrimeData.json
+│           ├── osm_cache.json
+│           └── safe_stops_cache.json
 │
 ├── docs/
 │
@@ -343,7 +374,7 @@ SafeRoute/
 
 ---
 
-## 🔄 Route Evaluation Flow
+## 🔄 Route Evaluation & Safe Stops Flow
 
 ```text
 User enters origin + destination
@@ -385,6 +416,16 @@ User enters origin + destination
      └───────┬─────────┘
              ↓
        AI Route Summary
+             ↓
+      Route Selection
+             ↓
+ ┌─────────────────────────┐
+ │ SAFE STOPS / POI ENGINE │
+ │ (Corridor buffer 500m)  │
+ └─────────────────────────┘
+             ↓
+  Display facilities along 
+      selected route
              ↓
         React Map UI
 ```
