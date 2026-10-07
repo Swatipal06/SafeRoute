@@ -172,5 +172,7 @@ async function calculateRouteSafetyScore(routeGeoJSON, recentReports = [], osmZo
 }
 
 module.exports = {
-  calculateRouteSafetyScore
+  calculateRouteSafetyScore,
+  getDistanceFromLatLonInKm,
+  deg2rad
 };

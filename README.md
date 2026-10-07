@@ -678,7 +678,7 @@ Before production deployment, the following improvements are planned:
 * Move tracking state to a persistent/centralized store for multi-instance deployment.
 * Add stronger request validation.
 * Add audit logging for sensitive operations.
-* Add automated backend and ML-service tests.
+* Expand test suite with automated end-to-end CI/CD and ML microservice pipelines.
 
 ---
 
