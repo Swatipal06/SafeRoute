@@ -2,9 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import MapView from './MapView';
 import SafeStopsPanel from './SafeStopsPanel';
-import { io } from 'socket.io-client';
-
-const socket = io(import.meta.env.DEV ? `http://${window.location.hostname}:5000` : undefined);
+import { socket } from '../utils/api';
 import RouteSearchBar from './RouteSearchBar';
 
 function MainApp() {

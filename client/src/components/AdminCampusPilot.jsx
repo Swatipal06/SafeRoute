@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { DARK_TILES } from '../utils/mapTiles';
+import { getApiUrl } from '../utils/api';
 
 // Custom glowing marker for selected point
 const CustomPointIcon = L.divIcon({
@@ -81,7 +82,7 @@ const AdminCampusPilot = () => {
     setMetrics(null);
 
     try {
-      const response = await fetch(`/api/admin/evaluate-point?lat=${latlng.lat}&lng=${latlng.lng}`);
+      const response = await fetch(getApiUrl(`/api/admin/evaluate-point?lat=${latlng.lat}&lng=${latlng.lng}`));
       const data = await response.json();
       setMetrics(data);
     } catch (error) {

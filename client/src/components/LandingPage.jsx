@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import { DARK_TILES } from '../utils/mapTiles';
+import { getApiUrl } from '../utils/api';
 
 // Create a custom neon green glowing dot icon
 const createGlowingDot = (size, opacity, animationDelay) => {
@@ -46,7 +47,7 @@ function LandingPage() {
     const payload = isLoginMode ? { email: formData.email, password: formData.password } : formData;
     
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch(getApiUrl(endpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
