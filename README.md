@@ -592,6 +592,46 @@ The Vite development server will provide the frontend.
 
 ---
 
+### 7. Run automated tests
+
+SafeRoute includes automated unit and integration tests using Jest and Supertest:
+
+```bash
+cd server
+npm test
+```
+
+Test coverage includes:
+* `safeStopsService.test.js`: Polyline corridor distance, category normalization, and POI deduplication.
+* `safeStopsApi.test.js`: `/api/routes/safe-stops` integration tests.
+* `safetyScoreEngine.test.js`: Mathematical helpers, Haversine routing formulas, and offline fallback scoring.
+* `api.test.js`: Express rate limiting on sensitive incident report endpoints.
+
+---
+
+## 🚀 Deployment Guide (Vercel + Render)
+
+SafeRoute is configured for cloud deployment with decoupled frontend and backend hosting:
+
+### 1. Backend (Render)
+1. Create a **Web Service** on [Render](https://render.com) pointing to the repository.
+2. Set **Root Directory** to `server`.
+3. Set **Build Command** to `npm install` and **Start Command** to `npm start`.
+4. Configure environment variables in Render:
+   * `MONGODB_URI`: Your MongoDB Atlas connection string.
+   * `JWT_SECRET`: A secure random secret key.
+   * `OPENROUTER_API_KEY`: *(Optional)* OpenRouter key for AI summaries.
+   * `TWILIO_*`: *(Optional)* Twilio credentials for SMS dispatch.
+
+### 2. Frontend (Vercel)
+1. Import the repository on [Vercel](https://vercel.com).
+2. Set **Root Directory** to `client`.
+3. Framework preset: **Vite**.
+4. Add environment variables:
+   * `VITE_BACKEND_URL`: Your deployed Render service URL (e.g., `https://saferoute-api.onrender.com`).
+   * `VITE_CARTO_API_KEY`: *(Optional)* Carto Basemaps API key.
+5. Deploy. SPA routing is managed via `client/vercel.json`.
+
 ## 🔑 External Services
 
 SafeRoute integrates with:
