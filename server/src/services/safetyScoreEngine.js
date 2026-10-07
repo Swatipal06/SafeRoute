@@ -111,11 +111,13 @@ async function calculateRouteSafetyScore(routeGeoJSON, recentReports = [], osmZo
 
   if (batchMetrics.length === 0) return 50;
 
+  const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://localhost:5001';
+
   // -- COMPUTER VISION INTEGRATION --
   // Let's do a CV check for the middle point of the route to anchor the real-world metrics!
   try {
     const midPoint = coords[Math.floor(coords.length / 2)];
-    const cvResponse = await axios.post('http://localhost:5001/analyze_street', {
+    const cvResponse = await axios.post(`${mlServiceUrl}/analyze_street`, {
       lng: midPoint[0],
       lat: midPoint[1]
     });
@@ -138,7 +140,7 @@ async function calculateRouteSafetyScore(routeGeoJSON, recentReports = [], osmZo
   // 2. Fetch predictions from Python ML microservice in one batch!
   let averageScore = 50;
   try {
-    const response = await axios.post('http://localhost:5001/predict', batchMetrics);
+    const response = await axios.post(`${mlServiceUrl}/predict`, batchMetrics);
     const scores = response.data.scores; // Array of scores
     
     const totalScore = scores.reduce((sum, val) => sum + val, 0);

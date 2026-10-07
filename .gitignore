@@ -1,3 +1,53 @@
+# Dependencies
 node_modules/
+client/node_modules/
+server/node_modules/
+
+# Environment Variables & Local Secrets
 .env
+.env.*
+*.env
+!.env.example
+
+# Build & Bundler Artifacts
+dist/
+dist-ssr/
+client/dist/
+
+# Python, Virtual Environments & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+ENV/
+
+# Large ML Weights & Model Files
+*.pt
+*.joblib
+
+# Logs & Debug
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test Coverage
+coverage/
+.nyc_output/
+
+# Operating System & IDE Files
 .DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

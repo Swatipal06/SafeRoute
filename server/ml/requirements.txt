@@ -2,3 +2,5 @@ scikit-learn
 pandas
 joblib
 flask
+opencv-python
+ultralytics
