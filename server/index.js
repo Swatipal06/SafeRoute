@@ -510,18 +510,11 @@ app.get('/api/routes/safe-stops', async (req, res) => {
 });
 
 // ==========================================
-// PRODUCTION STATIC SERVING
+// HEALTH CHECK / ROOT ENDPOINT
+// (Frontend is hosted separately on Vercel)
 // ==========================================
-const clientBuildPath = path.join(__dirname, '../client/dist');
-app.use(express.static(clientBuildPath));
-
-// Fallback to index.html for React Router
-app.use((req, res, next) => {
-  if (req.method === 'GET') {
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  } else {
-    next();
-  }
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'SafeRoute API is running' });
 });
 
 // ==========================================
