@@ -77,6 +77,37 @@ Community Hazard Penalty
 
 The backend samples points along the route and evaluates the surrounding safety context before producing an aggregate score.
 
+### 📐 Safety Score Formula & Data Contribution
+
+The safety score engine evaluates road segments on a scale of **0 to 100**, where **100 represents the safest path**. The baseline evaluation uses a **Multi-Criteria Weighted Sum Formula** (which also serves as the ground-truth target function for training the Random Forest ML model in `server/ml/train.py`):
+
+```text
+safety_score = (
+    0.30 × lighting_score +
+    0.25 × crowd_density_score +
+    0.20 × (100 - crime_incidence_score) +
+    0.15 × cctv_police_proximity_score +
+    0.10 × live_community_report_score
+)
+```
+
+#### Percentage Data Contribution Breakdown
+
+All input features are normalized on a `0–100` scale:
+
+| Metric | Contribution (%) | Weight | Description |
+| :--- | :---: | :---: | :--- |
+| **Street Lighting Score** (`lighting_score`) | **30%** | `0.30` | Quality of street illumination derived from NASA GIBS night-light satellite tiles, OSM unlit street tags, and computer-vision brightness. (100 = brightly lit, 0 = dark). |
+| **Crowd Density Score** (`crowd_density_score`) | **25%** | `0.25` | "Eyes on the street" metric derived from POI density (commercial/retail open status based on time of day) and YOLOv8 crowd detections. (100 = active crowd, 0 = deserted). |
+| **Crime Safety Index** (`100 - crime_incidence_score`) | **20%** | `0.20` | Historical localized crime rate indicator. Inverted (`100 - crime_score`) because lower crime incidence yields higher safety. |
+| **CCTV & Police Proximity** (`cctv_police_proximity_score`) | **15%** | `0.15` | Proximity to surveillance cameras, emergency help points, or police stations identified via OpenStreetMap. |
+| **Live Community Reports** (`live_community_report_score`) | **10%** | `0.10` | Real-time community hazard perception signals ("feels unsafe", "harassment", "unlit area"). |
+
+#### Route-Level Modifiers & Penalties
+
+1. **Live Hazard Deduction**: For every active, verified community report within **500 meters** (`0.5 km`) of the route corridor, a direct penalty of **-5 points** is deducted from the final aggregated route score.
+2. **Bounds**: Scores are clamped between `0` and `100` and rounded to the nearest integer.
+
 ---
 
 ### 🛰️ Satellite-Derived Lighting Signal
@@ -782,13 +813,11 @@ The main engineering challenge is combining heterogeneous data sources into a si
 
 ---
 
-## 👩‍💻 Project
+## 👩‍💻 Author
 
-**SafeRoute**
-
-A safety-aware navigation platform combining geospatial intelligence, machine learning, community reporting, real-time tracking, and emergency assistance.
-
-Built with React, Node.js, MongoDB, Python, Socket.IO, OpenStreetMap, NASA GIBS, OSRM, OpenRouter, and Twilio.
+**Swati Pal**
+* GitHub: [@Swatipal06](https://github.com/Swatipal06)
+* Repository: [SafeRoute](https://github.com/Swatipal06/SafeRoute)
 
 ---
 

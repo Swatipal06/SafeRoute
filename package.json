@@ -10,7 +10,7 @@
     "client": "cd client && npm run dev"
   },
   "keywords": [],
-  "author": "",
+  "author": "Swati Pal",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {

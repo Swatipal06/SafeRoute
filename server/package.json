@@ -10,7 +10,7 @@
     "test": "jest"
   },
   "keywords": [],
-  "author": "",
+  "author": "Swati Pal",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
